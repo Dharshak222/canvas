@@ -1,0 +1,1203 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Advanced Two Hand Air Canvas</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial, sans-serif;
+}
+
+#video {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.30;
+    z-index: 1;
+}
+
+#canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2;
+    pointer-events: none;
+}
+
+#panel {
+    position: fixed;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+
+    min-width: 320px;
+    padding: 12px 18px;
+
+    border-radius: 15px;
+    background: rgba(0,0,0,0.72);
+    color: white;
+
+    text-align: center;
+    backdrop-filter: blur(10px);
+}
+
+#title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #00ffff;
+}
+
+#status {
+    margin-top: 5px;
+    font-size: 14px;
+}
+
+#controls {
+    margin-top: 10px;
+
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+button {
+    border: none;
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+#start {
+    position: fixed;
+    z-index: 20;
+
+    top: 50%;
+    left: 50%;
+
+    transform: translate(-50%, -50%);
+
+    padding: 18px 32px;
+
+    border: none;
+    border-radius: 14px;
+
+    background: #00eaff;
+    color: #000;
+
+    font-size: 20px;
+    font-weight: bold;
+
+    cursor: pointer;
+
+    box-shadow: 0 0 20px #00eaff;
+}
+
+.color {
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid white;
+}
+
+#cyan { background: #00ffff; }
+#red { background: #ff1744; }
+#green { background: #00ff66; }
+#yellow { background: #ffff00; }
+#purple { background: #b000ff; }
+#white { background: white; }
+
+.cursor {
+    position: fixed;
+
+    width: 18px;
+    height: 18px;
+
+    border-radius: 50%;
+    border: 3px solid;
+
+    transform: translate(-50%, -50%);
+
+    z-index: 8;
+    pointer-events: none;
+
+    display: none;
+}
+
+#leftCursor {
+    border-color: #00ffff;
+
+    box-shadow:
+        0 0 10px #00ffff,
+        0 0 25px #00ffff;
+}
+
+#rightCursor {
+    border-color: #ff1744;
+
+    box-shadow:
+        0 0 10px #ff1744,
+        0 0 25px #ff1744;
+}
+</style>
+</head>
+
+<body>
+
+<video id="video"
+       autoplay
+       muted
+       playsinline>
+</video>
+
+<canvas id="canvas"></canvas>
+
+<div id="leftCursor" class="cursor"></div>
+<div id="rightCursor" class="cursor"></div>
+
+<div id="panel">
+
+    <div id="title">
+        ✋ TWO HAND AIR CANVAS
+    </div>
+
+    <div id="status">
+        Press START CAMERA
+    </div>
+
+    <div id="controls">
+
+        <button id="clear">Clear</button>
+        <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
+
+        <button id="thin">Thin</button>
+        <button id="medium">Medium</button>
+        <button id="thick">Thick</button>
+
+        <button class="color" id="cyan"></button>
+        <button class="color" id="red"></button>
+        <button class="color" id="green"></button>
+        <button class="color" id="yellow"></button>
+        <button class="color" id="purple"></button>
+        <button class="color" id="white"></button>
+
+    </div>
+</div>
+
+<button id="start">
+    START CAMERA
+</button>
+
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+
+<script>
+
+/* =========================================================
+   ELEMENTS
+========================================================= */
+
+const video =
+    document.getElementById("video");
+
+const canvas =
+    document.getElementById("canvas");
+
+const ctx =
+    canvas.getContext("2d");
+
+const startButton =
+    document.getElementById("start");
+
+const statusText =
+    document.getElementById("status");
+
+const clearButton =
+    document.getElementById("clear");
+
+const undoButton =
+    document.getElementById("undo");
+
+const redoButton =
+    document.getElementById("redo");
+
+const thinButton =
+    document.getElementById("thin");
+
+const mediumButton =
+    document.getElementById("medium");
+
+const thickButton =
+    document.getElementById("thick");
+
+const leftCursor =
+    document.getElementById("leftCursor");
+
+const rightCursor =
+    document.getElementById("rightCursor");
+
+
+/* =========================================================
+   SETTINGS
+========================================================= */
+
+let brushColor = "#00ffff";
+
+let brushSize = 7;
+
+let running = false;
+
+let processing = false;
+
+
+/*
+    Separate state for each hand.
+*/
+
+const handsState = {
+
+    Left: {
+        x: null,
+        y: null,
+        smoothX: null,
+        smoothY: null,
+        visible: false
+    },
+
+    Right: {
+        x: null,
+        y: null,
+        smoothX: null,
+        smoothY: null,
+        visible: false
+    }
+
+};
+
+
+/* =========================================================
+   UNDO / REDO
+========================================================= */
+
+let history = [];
+
+let redoHistory = [];
+
+
+function saveState() {
+
+    history.push(
+        canvas.toDataURL()
+    );
+
+    if (history.length > 30) {
+        history.shift();
+    }
+
+    redoHistory = [];
+}
+
+
+function restoreImage(data) {
+
+    const image = new Image();
+
+    image.onload = function() {
+
+        ctx.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+        ctx.drawImage(
+            image,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+    };
+
+    image.src = data;
+}
+
+
+/* =========================================================
+   UNDO
+========================================================= */
+
+undoButton.onclick = function() {
+
+    if (history.length === 0) {
+        return;
+    }
+
+    redoHistory.push(
+        canvas.toDataURL()
+    );
+
+    history.pop();
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    if (history.length > 0) {
+
+        restoreImage(
+            history[history.length - 1]
+        );
+
+    }
+};
+
+
+/* =========================================================
+   REDO
+========================================================= */
+
+redoButton.onclick = function() {
+
+    if (redoHistory.length === 0) {
+        return;
+    }
+
+    history.push(
+        canvas.toDataURL()
+    );
+
+    const image =
+        redoHistory.pop();
+
+    restoreImage(image);
+};
+
+
+/* =========================================================
+   CLEAR
+========================================================= */
+
+clearButton.onclick = function() {
+
+    saveState();
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    resetAllHands();
+};
+
+
+/* =========================================================
+   BRUSH SIZE
+========================================================= */
+
+thinButton.onclick = function() {
+    brushSize = 4;
+};
+
+mediumButton.onclick = function() {
+    brushSize = 7;
+};
+
+thickButton.onclick = function() {
+    brushSize = 14;
+};
+
+
+/* =========================================================
+   COLORS
+========================================================= */
+
+document.getElementById("cyan").onclick =
+    () => brushColor = "#00ffff";
+
+document.getElementById("red").onclick =
+    () => brushColor = "#ff1744";
+
+document.getElementById("green").onclick =
+    () => brushColor = "#00ff66";
+
+document.getElementById("yellow").onclick =
+    () => brushColor = "#ffff00";
+
+document.getElementById("purple").onclick =
+    () => brushColor = "#b000ff";
+
+document.getElementById("white").onclick =
+    () => brushColor = "#ffffff";
+
+
+/* =========================================================
+   CANVAS RESIZE
+========================================================= */
+
+function resizeCanvas() {
+
+    const oldCanvas =
+        document.createElement("canvas");
+
+    oldCanvas.width =
+        canvas.width;
+
+    oldCanvas.height =
+        canvas.height;
+
+    if (
+        canvas.width > 0 &&
+        canvas.height > 0
+    ) {
+
+        oldCanvas
+            .getContext("2d")
+            .drawImage(
+                canvas,
+                0,
+                0
+            );
+    }
+
+    canvas.width =
+        window.innerWidth;
+
+    canvas.height =
+        window.innerHeight;
+
+    if (
+        oldCanvas.width > 0 &&
+        oldCanvas.height > 0
+    ) {
+
+        ctx.drawImage(
+            oldCanvas,
+            0,
+            0,
+            oldCanvas.width,
+            oldCanvas.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+    }
+}
+
+resizeCanvas();
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
+);
+
+
+/* =========================================================
+   RESET ONE HAND
+========================================================= */
+
+function resetHand(handName) {
+
+    const hand =
+        handsState[handName];
+
+    hand.x = null;
+    hand.y = null;
+
+    hand.smoothX = null;
+    hand.smoothY = null;
+
+    hand.visible = false;
+
+
+    if (handName === "Left") {
+
+        leftCursor.style.display =
+            "none";
+
+    }
+
+    if (handName === "Right") {
+
+        rightCursor.style.display =
+            "none";
+
+    }
+}
+
+
+/* =========================================================
+   RESET BOTH HANDS
+========================================================= */
+
+function resetAllHands() {
+
+    resetHand("Left");
+    resetHand("Right");
+}
+
+
+/* =========================================================
+   SMOOTH POSITION
+========================================================= */
+
+function smoothPosition(
+    handName,
+    x,
+    y
+) {
+
+    const hand =
+        handsState[handName];
+
+
+    /*
+        First frame
+    */
+
+    if (
+        hand.smoothX === null ||
+        hand.smoothY === null
+    ) {
+
+        hand.smoothX = x;
+        hand.smoothY = y;
+
+        return {
+            x: x,
+            y: y
+        };
+    }
+
+
+    /*
+        Smoothing factor.
+
+        Smaller =
+        smoother.
+
+        Larger =
+        faster.
+    */
+
+    const smoothing = 0.30;
+
+
+    hand.smoothX +=
+        (x - hand.smoothX) *
+        smoothing;
+
+    hand.smoothY +=
+        (y - hand.smoothY) *
+        smoothing;
+
+
+    return {
+        x: hand.smoothX,
+        y: hand.smoothY
+    };
+}
+
+
+/* =========================================================
+   DRAW SMOOTH LINE
+========================================================= */
+
+function drawSmoothLine(
+    x1,
+    y1,
+    x2,
+    y2
+) {
+
+    const dx =
+        x2 - x1;
+
+    const dy =
+        y2 - y1;
+
+    const distance =
+        Math.sqrt(
+            dx * dx +
+            dy * dy
+        );
+
+
+    /*
+        More interpolation points
+        when moving quickly.
+    */
+
+    const steps =
+        Math.max(
+            1,
+            Math.ceil(
+                distance / 2.5
+            )
+        );
+
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        x1,
+        y1
+    );
+
+
+    for (
+        let i = 1;
+        i <= steps;
+        i++
+    ) {
+
+        const t =
+            i / steps;
+
+        const x =
+            x1 + dx * t;
+
+        const y =
+            y1 + dy * t;
+
+        ctx.lineTo(
+            x,
+            y
+        );
+    }
+
+
+    ctx.strokeStyle =
+        brushColor;
+
+    ctx.lineWidth =
+        brushSize;
+
+    ctx.lineCap =
+        "round";
+
+    ctx.lineJoin =
+        "round";
+
+
+    ctx.shadowBlur =
+        14;
+
+    ctx.shadowColor =
+        brushColor;
+
+
+    ctx.stroke();
+
+
+    ctx.shadowBlur = 0;
+}
+
+
+/* =========================================================
+   PROCESS ONE HAND
+========================================================= */
+
+function processHand(
+    hand,
+    handName
+) {
+
+    const state =
+        handsState[handName];
+
+
+    /*
+        Index fingertip = landmark 8
+    */
+
+    const indexTip =
+        hand[8];
+
+
+    /*
+        Convert MediaPipe coordinates
+        to screen coordinates.
+
+        Camera is mirrored, therefore:
+
+        X = 1 - x
+    */
+
+    const rawX =
+        (1 - indexTip.x) *
+        canvas.width;
+
+    const rawY =
+        indexTip.y *
+        canvas.height;
+
+
+    /*
+        Smooth position
+    */
+
+    const position =
+        smoothPosition(
+            handName,
+            rawX,
+            rawY
+        );
+
+
+    const x =
+        position.x;
+
+    const y =
+        position.y;
+
+
+    /*
+        First point of this hand
+    */
+
+    if (
+        state.x === null ||
+        state.y === null
+    ) {
+
+        state.x = x;
+        state.y = y;
+
+        return;
+    }
+
+
+    /*
+        Draw continuously.
+
+        No pinch required.
+    */
+
+    drawSmoothLine(
+        state.x,
+        state.y,
+        x,
+        y
+    );
+
+
+    /*
+        Save current position
+    */
+
+    state.x = x;
+    state.y = y;
+    state.visible = true;
+
+
+    /*
+        Update cursor
+    */
+
+    const cursor =
+        handName === "Left"
+            ? leftCursor
+            : rightCursor;
+
+
+    cursor.style.display =
+        "block";
+
+    cursor.style.left =
+        x + "px";
+
+    cursor.style.top =
+        y + "px";
+}
+
+
+/* =========================================================
+   MEDIAPIPE HANDS
+========================================================= */
+
+const hands =
+    new Hands({
+
+        locateFile:
+            function(file) {
+
+                return (
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/"
+                    + file
+                );
+
+            }
+
+    });
+
+
+hands.setOptions({
+
+    /*
+        IMPORTANT:
+
+        Two hands.
+    */
+
+    maxNumHands: 2,
+
+    modelComplexity: 1,
+
+    minDetectionConfidence: 0.70,
+
+    minTrackingConfidence: 0.70,
+
+    selfieMode: false
+
+});
+
+
+/* =========================================================
+   HAND RESULTS
+========================================================= */
+
+hands.onResults(function(results) {
+
+    /*
+        If no hands
+    */
+
+    if (
+        !results.multiHandLandmarks ||
+        results.multiHandLandmarks.length === 0
+    ) {
+
+        statusText.innerHTML =
+            "Show one or two hands ☝️";
+
+        resetAllHands();
+
+        return;
+    }
+
+
+    /*
+        Track which hands are currently visible.
+    */
+
+    let leftFound = false;
+    let rightFound = false;
+
+
+    /*
+        Process every detected hand.
+    */
+
+    for (
+        let i = 0;
+        i < results.multiHandLandmarks.length;
+        i++
+    ) {
+
+        const hand =
+            results.multiHandLandmarks[i];
+
+
+        /*
+            MediaPipe tells us
+            whether this is Left or Right.
+        */
+
+        const handedness =
+            results.multiHandedness[i];
+
+
+        if (!handedness) {
+            continue;
+        }
+
+
+        let handName =
+            handedness.label;
+
+
+        /*
+            IMPORTANT:
+
+            MediaPipe's handedness is based
+            on the mirrored/selfie interpretation.
+
+            We keep the labels consistently
+            separated for drawing.
+        */
+
+
+        if (handName === "Left") {
+
+            leftFound = true;
+
+        }
+
+        if (handName === "Right") {
+
+            rightFound = true;
+
+        }
+
+
+        processHand(
+            hand,
+            handName
+        );
+    }
+
+
+    /*
+        Reset hand that disappeared.
+
+        This prevents a line from jumping
+        when the hand comes back.
+    */
+
+    if (!leftFound) {
+
+        resetHand("Left");
+
+    }
+
+    if (!rightFound) {
+
+        resetHand("Right");
+
+    }
+
+
+    /*
+        Status
+    */
+
+    if (
+        leftFound &&
+        rightFound
+    ) {
+
+        statusText.innerHTML =
+            "🔥 TWO HANDS — drawing with both index fingers";
+
+    }
+
+    else if (leftFound) {
+
+        statusText.innerHTML =
+            "☝️ LEFT HAND — drawing";
+
+    }
+
+    else if (rightFound) {
+
+        statusText.innerHTML =
+            "☝️ RIGHT HAND — drawing";
+
+    }
+
+});
+
+
+/* =========================================================
+   START CAMERA
+========================================================= */
+
+startButton.onclick =
+    async function() {
+
+        try {
+
+            statusText.innerHTML =
+                "Opening camera...";
+
+
+            cameraStream =
+                await navigator.mediaDevices
+                .getUserMedia({
+
+                    video: {
+
+                        facingMode:
+                            "user",
+
+                        width: {
+                            ideal: 1280
+                        },
+
+                        height: {
+                            ideal: 720
+                        },
+
+                        frameRate: {
+                            ideal: 30,
+                            max: 30
+                        }
+
+                    },
+
+                    audio: false
+
+                });
+
+
+            video.srcObject =
+                cameraStream;
+
+
+            await video.play();
+
+
+            running = true;
+
+
+            startButton.style.display =
+                "none";
+
+
+            statusText.innerHTML =
+                "Show one or two hands ☝️";
+
+
+            processVideo();
+
+        }
+
+        catch(error) {
+
+            console.error(error);
+
+
+            startButton.style.display =
+                "block";
+
+
+            statusText.innerHTML =
+                "Camera blocked. Allow camera permission.";
+
+        }
+    };
+
+
+/* =========================================================
+   PROCESS VIDEO
+========================================================= */
+
+async function processVideo() {
+
+    if (!running) {
+        return;
+    }
+
+
+    /*
+        Prevent overlapping MediaPipe calls.
+    */
+
+    if (
+        video.readyState >= 2 &&
+        !processing
+    ) {
+
+        processing = true;
+
+        try {
+
+            await hands.send({
+                image: video
+            });
+
+        }
+
+        catch(error) {
+
+            console.error(
+                "MediaPipe error:",
+                error
+            );
+
+        }
+
+        processing = false;
+    }
+
+
+    requestAnimationFrame(
+        processVideo
+    );
+}
+
+
+/* =========================================================
+   KEYBOARD SHORTCUTS
+========================================================= */
+
+document.addEventListener(
+    "keydown",
+    function(event) {
+
+        const key =
+            event.key.toLowerCase();
+
+
+        if (key === "c") {
+            clearButton.click();
+        }
+
+        if (key === "z") {
+            undoButton.click();
+        }
+
+        if (key === "r") {
+            redoButton.click();
+        }
+
+        if (event.key === "1") {
+            brushSize = 4;
+        }
+
+        if (event.key === "2") {
+            brushSize = 7;
+        }
+
+        if (event.key === "3") {
+            brushSize = 14;
+        }
+
+    }
+);
+
+</script>
+
+</body>
+</html>
+```
